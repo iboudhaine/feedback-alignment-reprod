@@ -39,7 +39,7 @@ Outputs: `results/linear_fig1_*.csv` (per-step NSE and angles).
 python run.py linear --figure 4 --alg fa --n_trials 20 --seed 0
 ```
 
-Outputs: `results/linear_fig4_*.csv` (final NSE and angle statistics per ω).
+Outputs: `results/linear_fig4_*.csv` (per-step NSE and angles per omega and trial).
 
 ## Reproduce Task (2) MNIST
 

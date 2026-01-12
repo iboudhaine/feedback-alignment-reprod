@@ -75,16 +75,16 @@ def run_fig1(cfg: LinearTaskConfig, alg: str, out_csv: Path):
 def run_fig4(omega_list, n_trials: int, eta: float, seed: int, out_csv: Path):
     """
     Fig. 4 uses same setup as Fig. 1, but:
-      - learning rate η = 1e-3
-      - vary ω (init scale of W0,W)
-    We report:
-      - final NSE
-      - average angle(Δh_FA, Δh_BP) across steps
-      - average angle(Δh_FA, Δh_PBP) across steps, where Δh_PBP = W^+ e
+      - learning rate eta = 1e-3
+      - vary omega (init scale of W0,W)
+    We report per-step:
+      - NSE
+      - angle(dh_fa, dh_bp)
+      - angle(dh_fa, dh_pbp), where dh_pbp = W^+ e
     """
     out_csv.parent.mkdir(parents=True, exist_ok=True)
 
-    header = ["omega","trial","final_nse","mean_ang_fa_bp","mean_ang_fa_pbp"]
+    header = ["omega","trial","step","nse","angle_dh_fa_bp","angle_dh_fa_pbp"]
     with out_csv.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=header)
         w.writeheader()
@@ -99,10 +99,6 @@ def run_fig4(omega_list, n_trials: int, eta: float, seed: int, out_csv: Path):
                 W  = uniform_matrix((cfg.no, cfg.nh), cfg.omega, rng)
                 B  = rng.uniform(-cfg.b_scale, cfg.b_scale, size=(cfg.nh, cfg.no)).astype(np.float64)
 
-                ang_fa_bp = []
-                ang_fa_pbp = []
-                final_nse = None
-
                 for t in range(cfg.n_examples):
                     x = X[t]
                     y_star = Y[t]
@@ -112,23 +108,19 @@ def run_fig4(omega_list, n_trials: int, eta: float, seed: int, out_csv: Path):
 
                     dh_bp = W.T @ e
                     dh_fa = B @ e
-                    # pseudobackprop: Δh_PBP = W^+ e (Moore-Penrose pseudoinverse)
+                    # pseudobackprop: dh_pbp = W^+ e (Moore-Penrose pseudoinverse)
                     W_plus = np.linalg.pinv(W)  # shape (nh, no)
                     dh_pbp = W_plus @ e
 
-                    ang_fa_bp.append(angle(dh_fa, dh_bp))
-                    ang_fa_pbp.append(angle(dh_fa, dh_pbp))
+                    w.writerow({
+                        "omega": omega,
+                        "trial": trial,
+                        "step": t,
+                        "nse": nse(y_star, y),
+                        "angle_dh_fa_bp": angle(dh_fa, dh_bp),
+                        "angle_dh_fa_pbp": angle(dh_fa, dh_pbp),
+                    })
 
                     # FA learning
                     W  = W  + cfg.eta * np.outer(e, h)
                     W0 = W0 + cfg.eta * np.outer(dh_fa, x)
-
-                    final_nse = nse(y_star, y)
-
-                w.writerow({
-                    "omega": omega,
-                    "trial": trial,
-                    "final_nse": final_nse,
-                    "mean_ang_fa_bp": float(np.mean(ang_fa_bp)),
-                    "mean_ang_fa_pbp": float(np.mean(ang_fa_pbp)),
-                })

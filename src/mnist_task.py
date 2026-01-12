@@ -60,11 +60,14 @@ def _init_params(cfg: MNISTConfig, rng: np.random.Generator):
     else:
         B = rng.uniform(-cfg.beta, cfg.beta, size=(cfg.nh, cfg.no)).astype(np.float64)
 
-    if cfg.sparse50 and B is not None:
+    if cfg.sparse50:
         mask_W = mask50(W.shape, rng)
-        mask_B = mask50(B.shape, rng)
         W *= mask_W
-        B *= mask_B
+        if B is not None:
+            mask_B = mask50(B.shape, rng)
+            B *= mask_B
+        else:
+            mask_B = None
     else:
         mask_W = None
         mask_B = None
