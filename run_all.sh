@@ -7,6 +7,9 @@ feedback-alignment linear --figure 1 --alg bp --quiet
 feedback-alignment linear --figure 1 --alg fa --quiet
 feedback-alignment linear --figure 4 --quiet
 
+echo "=== Priming MNIST cache (single-process download) ==="
+python -c "from pathlib import Path; from feedback_alignment.mnist import load_mnist; load_mnist(Path('data/mnist'))"
+
 echo "=== Task 2: MNIST grid (13 runs in parallel, 7 at a time) ==="
 parallel -j 7 --line-buffer ::: \
     "feedback-alignment mnist --alg bp --omega 0.05 --quiet" \
