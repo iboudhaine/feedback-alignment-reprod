@@ -1,86 +1,80 @@
-# Feedback Alignment (Lillicrap et al., 2014) — Reproduction Scaffold
+# Feedback Alignment
 
-This repository implements **the algorithms and experimental setups exactly as specified in the paper’s “Full Methods”** for:
-- **Task (1)** Linear function approximation (30–20–10)
-- **Task (2)** MNIST classification (784–1000–10 logistic units)
-- **Task (3)** Nonlinear function approximation (30–20–10 and 30–20–10–10 vs a 30–20–10–10 target)
+A reproduction of the three experiments from Lillicrap et al. 2014,
+"Random feedback weights support learning in deep neural networks".
+The paper shows that the precise transpose of the forward weights is not
+required for credit assignment: fixed random feedback matrices suffice, and
+the forward weights gradually align with them during training.
 
-## What the paper specifies vs. what it leaves to manual search
+The repo implements all three tasks from the paper:
 
-The paper explicitly specifies:
-- Task (1): target `T ~ Uniform[-1,1]`, `x ~ N(0,I)`, `W0,W ~ Uniform[-0.01,0.01]`, `B ~ Uniform[-0.5,0.5]`, dataset fixed across algorithms.
-- Fig. 4: same as Fig. 1 but **η = 1e-3** and `ω ∈ {0.0001, 0.001, 0.01, 0.05, 0.1, 0.125, 0.15, 0.2, 0.25}`.
-- Task (2): logistic hidden+output units, biases, 1-hot labels, MNIST 60k/10k, **η = 1e-3**, **weight decay α = 1e-6**, `W0,W ~ Uniform[-ω,ω]` and `B ~ Uniform[-β,β]` with **ω and β chosen by manual search**, and (optionally) 50% sparsity in `W` and `B` by masking at init.
-- Task (3): tanh hidden, linear output, biases, target-network formula; `x ~ N(0,I)`, dataset fixed, 5000 test points, `B1,B2` scales selected manually; termination chosen by observing negligible gains.
+- Task 1: linear function approximation, 30 -> 20 -> 10.
+- Task 2: MNIST classification, 784 -> 1000 -> 10 with sigmoid units.
+- Task 3: nonlinear function approximation, student depth 3 or 4 against a
+  fixed teacher network.
 
-Because ω/β (Task 2) and B-scales/target regime (Task 3) are explicitly chosen by **manual search** in the paper, this repo provides **sweep commands** and writes results to CSV so you can replicate the paper’s selection procedure without inventing hyperparameters.
+Each task can be trained under standard backpropagation (BP), feedback
+alignment (FA), or shallow learning (output layer only).
 
-## Install
+## Setup
+
+Requires Python 3.10 or newer.
 
 ```bash
 python -m venv .venv
-# Windows: .venv\Scripts\activate
-source .venv/bin/activate
-pip install -r requirements.txt
+source .venv/bin/activate         # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"
 ```
 
-## Reproduce Task (1) / Fig. 1-style curves (linear 30–20–10)
+The install registers a `feedback-alignment` console script on your PATH.
+
+## How to run
+
+Every experiment is a subcommand of `feedback-alignment`. Output CSVs land in
+`results/`. The MNIST data is downloaded on first use into `data/mnist/`.
+
+Examples (short smoke runs):
 
 ```bash
-python run.py linear --figure 1 --alg bp --seed 0
-python run.py linear --figure 1 --alg fa --seed 0
+# Task 1, Fig 1 style: BP vs FA learning curves
+feedback-alignment linear --figure 1 --alg bp
+feedback-alignment linear --figure 1 --alg fa
+
+# Task 1, Fig 4 style: FA-only sweep over the init scale
+feedback-alignment linear --figure 4
+
+# Task 2: MNIST
+feedback-alignment mnist --alg bp --omega 0.1
+feedback-alignment mnist --alg fa --omega 0.1 --beta 0.1
+
+# Task 2 sweep over (omega, beta)
+feedback-alignment mnist-sweep --omega 0.05 0.1 0.2 --beta 0.05 0.1 0.2
+
+# Task 3: nonlinear
+feedback-alignment nonlinear --model 3 --alg fa --target-scale 1.0 --b1-scale 0.1
+feedback-alignment nonlinear --model 4 --alg fa --target-scale 1.0 --b1-scale 0.1 --b2-scale 0.1
+
+# Task 3 sweep
+feedback-alignment nonlinear-sweep --target-scale 0.5 1.0 2.0 --b1 0.05 0.1 0.2 --b2 0.05 0.1 0.2
 ```
 
-Outputs: `results/linear_fig1_*.csv` (per-step NSE and angles).
+Use `feedback-alignment <subcommand> --help` for the full flag list.
 
-## Reproduce Fig. 4 sweep over ω (linear 30–20–10)
+To generate plots from the CSVs in `results/`:
 
 ```bash
-python run.py linear --figure 4 --alg fa --n_trials 20 --seed 0
+python plot_all.py            # default plots
+python plot_all.py --paper    # paper-style figures
 ```
 
-Outputs: `results/linear_fig4_*.csv` (per-step NSE and angles per omega and trial).
-
-## Reproduce Task (2) MNIST
-
-### 1) Hyperparameter sweep to select ω and β (paper: manual search)
-```bash
-python run.py mnist_sweep --omega_list 0.01,0.05,0.1,0.2 --beta_list 0.05,0.1,0.2 --seed 0 --max_examples 1500000
-```
-
-### 2) Run backprop and feedback alignment with your selected ω,β
-```bash
-python run.py mnist --alg bp --omega 0.1 --seed 0 --max_examples 1500000
-python run.py mnist --alg fa --omega 0.1 --beta 0.1 --seed 0 --max_examples 1500000
-```
-
-### 3) 50% sparsity experiment (mask W and B at init and after each update)
-```bash
-python run.py mnist --alg fa --omega 0.1 --beta 0.1 --seed 0 --sparse50 --max_examples 1500000
-```
-
-Outputs: `results/mnist_*.csv` (test error and ∠(Δh_FA, Δh_BP) over time).
-
-## Reproduce Task (3) Nonlinear function approximation
-
-Because the paper states that the **target network regime** and **B1/B2 scales** are chosen manually, you should sweep.
+To run the test suite:
 
 ```bash
-python run.py nonlinear_sweep --seed 0 --steps 1500000 \
-  --b1_list 0.05,0.1,0.2 --b2_list 0.05,0.1,0.2 --target_scale_list 0.5,1.0,2.0
+pytest
 ```
 
-Then run:
-```bash
-python run.py nonlinear --model 3 --alg bp --seed 0 --steps 1500000 --target_scale 1.0
-python run.py nonlinear --model 3 --alg fa --seed 0 --steps 1500000 --target_scale 1.0 --b1_scale 0.1 --b2_scale 0.1
-python run.py nonlinear --model 4 --alg bp --seed 0 --steps 1500000 --target_scale 1.0
-python run.py nonlinear --model 4 --alg fa --seed 0 --steps 1500000 --target_scale 1.0 --b1_scale 0.1 --b2_scale 0.1
-```
+## Reference
 
-Outputs: `results/nonlinear_*.csv`
-
-## Plotting
-
-Plot utilities are in `src/plotting.py` (matplotlib) and can read the CSVs.
-
+Lillicrap, T. P., Cownden, D., Tweed, D. B., & Akerman, C. J. (2014).
+Random feedback weights support learning in deep neural networks.
+arXiv:1411.0247. https://arxiv.org/abs/1411.0247
