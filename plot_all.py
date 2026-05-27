@@ -50,8 +50,8 @@ def _plot_fig4(csv_path: Path, trial_id: int, out_dir: Path, show: bool):
 
     series = [
         ("nse", "nse", "NSE"),
-        ("angle_dh_fa_bp", "angle_bp", "Angle FA vs BP"),
-        ("angle_dh_fa_pbp", "angle_pbp", "Angle FA vs PBP"),
+        ("angle_delta_h_fa_bp", "angle_bp", "Angle FA vs BP"),
+        ("angle_delta_h_fa_pbp", "angle_pbp", "Angle FA vs PBP"),
     ]
     wrote = False
     for ycol, suffix, ylabel in series:
@@ -127,9 +127,9 @@ def _paper_fig1_linear(results_dir: Path, out_dir: Path, show: bool, window: int
             continue
         label, color = _algo_label_color(path.stem)
         ax1.plot(df["step"], df["nse"], color=color, label=label, linewidth=1.3)
-        if "angle_dh_fa_bp" in df.columns and "fa" in path.stem:
+        if "angle_delta_h_fa_bp" in df.columns and "fa" in path.stem:
             steps = df["step"]
-            fa_angle = np.degrees(df["angle_dh_fa_bp"])
+            fa_angle = np.degrees(df["angle_delta_h_fa_bp"])
 
     ax1.set_yscale("log")
     ax1.set_ylabel("Error (NSE)")
@@ -172,8 +172,8 @@ def _paper_fig2_mnist(results_dir: Path, out_dir: Path, show: bool):
         ax1.plot(df["examples_seen"], df["test_error_pct"], color=color, label=label, linewidth=1.3)
         plotted = True
 
-        if "fa" in path.stem and "mean_angle_dh_fa_bp" in df.columns:
-            angles = np.degrees(df["mean_angle_dh_fa_bp"])
+        if "fa" in path.stem and "mean_angle_delta_h_fa_bp" in df.columns:
+            angles = np.degrees(df["mean_angle_delta_h_fa_bp"])
             ax2.plot(df["examples_seen"], angles, color="#2ca02c", linewidth=1.3)
 
     if not plotted:
@@ -217,7 +217,7 @@ def _paper_fig2_nonlinear(results_dir: Path, out_dir: Path, show: bool):
     plotted = False
 
     for path in files:
-        m = re.search(r"nonlinear_model(\\d+)_(\\w+)_", path.stem)
+        m = re.search(r"nonlinear_model(\d+)_(bp|fa|shallow)", path.stem)
         if not m:
             continue
         model = m.group(1)
@@ -250,7 +250,7 @@ def _paper_fig2_nonlinear(results_dir: Path, out_dir: Path, show: bool):
 
 
 def _paper_fig4_linear(results_dir: Path, out_dir: Path, show: bool, trial_id: int, window: int):
-    files = list(results_dir.glob("linear_fig4_fa_sweep_seed*.csv"))
+    files = list(results_dir.glob("linear_fig4_seed*.csv"))
     if not files:
         return False
 
@@ -279,11 +279,11 @@ def _paper_fig4_linear(results_dir: Path, out_dir: Path, show: bool, trial_id: i
         for omega, sub in df.groupby("omega"):
             color = colors.get(omega, "#1f77b4")
             axes[0].plot(sub["step"], _smooth(sub["nse"], window), color=color, linewidth=1.0)
-            if "angle_dh_fa_bp" in sub.columns:
-                angles = np.degrees(sub["angle_dh_fa_bp"])
+            if "angle_delta_h_fa_bp" in sub.columns:
+                angles = np.degrees(sub["angle_delta_h_fa_bp"])
                 axes[1].plot(sub["step"], _smooth(pd.Series(angles), window), color=color, linewidth=1.0)
-            if "angle_dh_fa_pbp" in sub.columns:
-                angles = np.degrees(sub["angle_dh_fa_pbp"])
+            if "angle_delta_h_fa_pbp" in sub.columns:
+                angles = np.degrees(sub["angle_delta_h_fa_pbp"])
                 axes[2].plot(sub["step"], _smooth(pd.Series(angles), window), color=color, linewidth=1.0)
 
         axes[0].set_yscale("log")
@@ -333,14 +333,14 @@ def main():
     # Default plots
     linear_fig1 = list(results_dir.glob("linear_fig1_*_seed*.csv"))
     _plot_lines(linear_fig1, "step", "nse", "Linear Fig.1 NSE", out_dir / "linear_fig1_nse.png", args.show)
-    _plot_lines(linear_fig1, "step", "angle_dh_fa_bp", "Linear Fig.1 Angle (FA vs BP)", out_dir / "linear_fig1_angle.png", args.show)
+    _plot_lines(linear_fig1, "step", "angle_delta_h_fa_bp", "Linear Fig.1 Angle (FA vs BP)", out_dir / "linear_fig1_angle.png", args.show)
 
-    for path in results_dir.glob("linear_fig4_fa_sweep_seed*.csv"):
+    for path in results_dir.glob("linear_fig4_seed*.csv"):
         _plot_fig4(path, args.fig4_trial, out_dir, args.show)
 
     mnist_files = list(results_dir.glob("mnist_*_seed*.csv"))
     _plot_lines(mnist_files, "examples_seen", "test_error_pct", "MNIST Test Error", out_dir / "mnist_error.png", args.show)
-    _plot_lines(mnist_files, "examples_seen", "mean_angle_dh_fa_bp", "MNIST Angle (FA vs BP)", out_dir / "mnist_angle.png", args.show)
+    _plot_lines(mnist_files, "examples_seen", "mean_angle_delta_h_fa_bp", "MNIST Angle (FA vs BP)", out_dir / "mnist_angle.png", args.show)
 
     nonlinear_files = list(results_dir.glob("nonlinear_model*_seed*.csv"))
     _plot_lines(nonlinear_files, "examples_seen", "test_nse", "Nonlinear Test NSE", out_dir / "nonlinear_nse.png", args.show)
