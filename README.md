@@ -33,29 +33,44 @@ The install registers a `feedback-alignment` console script on your PATH.
 Every experiment is a subcommand of `feedback-alignment`. Output CSVs land in
 `results/`. The MNIST data is downloaded on first use into `data/mnist/`.
 
-Examples (short smoke runs):
+### Task 1: linear function approximation
+
+All hyperparameters are fixed by the paper, so the commands are direct:
 
 ```bash
-# Task 1, Fig 1 style: BP vs FA learning curves
 feedback-alignment linear --figure 1 --alg bp
 feedback-alignment linear --figure 1 --alg fa
-
-# Task 1, Fig 4 style: FA-only sweep over the init scale
 feedback-alignment linear --figure 4
+```
 
-# Task 2: MNIST
-feedback-alignment mnist --alg bp --omega 0.1
-feedback-alignment mnist --alg fa --omega 0.1 --beta 0.1
+### Task 2: MNIST
 
-# Task 2 sweep over (omega, beta)
+The paper chooses the init scale `omega` and feedback scale `beta` by manual
+search. Run the sweep first, then run the main command with your chosen
+values:
+
+```bash
 feedback-alignment mnist-sweep --omega 0.05 0.1 0.2 --beta 0.05 0.1 0.2
+# Inspect results/mnist_sweep_seed0.csv and pick the (omega, beta)
+# with the lowest final test error, then:
+feedback-alignment mnist --alg bp --omega <OMEGA>
+feedback-alignment mnist --alg fa --omega <OMEGA> --beta <BETA>
+```
 
-# Task 3: nonlinear
-feedback-alignment nonlinear --model 3 --alg fa --target-scale 1.0 --b1-scale 0.1
-feedback-alignment nonlinear --model 4 --alg fa --target-scale 1.0 --b1-scale 0.1 --b2-scale 0.1
+### Task 3: nonlinear function approximation
 
-# Task 3 sweep
-feedback-alignment nonlinear-sweep --target-scale 0.5 1.0 2.0 --b1 0.05 0.1 0.2 --b2 0.05 0.1 0.2
+The paper also chooses the teacher regime (`target-scale`) and feedback
+scales (`b1`, `b2`) by manual search:
+
+```bash
+feedback-alignment nonlinear-sweep --target-scale 0.5 1.0 2.0 \
+    --b1 0.05 0.1 0.2 --b2 0.05 0.1 0.2
+# Inspect results/nonlinear_sweep_seed0.csv and pick the combination
+# with the lowest final test NSE, then:
+feedback-alignment nonlinear --model 3 --alg fa \
+    --target-scale <TS> --b1-scale <B1>
+feedback-alignment nonlinear --model 4 --alg fa \
+    --target-scale <TS> --b1-scale <B1> --b2-scale <B2>
 ```
 
 Use `feedback-alignment <subcommand> --help` for the full flag list.
