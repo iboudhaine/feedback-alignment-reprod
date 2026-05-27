@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "feedback-alignment"
+version = "0.1.0"
+description = "Reproduction of Lillicrap et al. 2014, Random feedback weights support learning in deep neural networks."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "Ilyas Boudhaine" },
+    { name = "Abderrahmane Baidoune" },
+]
+dependencies = [
+    "numpy>=1.25",
+    "pandas>=2.0",
+    "matplotlib>=3.7",
+    "tqdm>=4.65",
+    "torch>=2.0",
+    "torchvision>=0.15",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+feedback-alignment = "feedback_alignment.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
