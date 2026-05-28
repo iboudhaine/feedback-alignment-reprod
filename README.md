@@ -81,7 +81,9 @@ feedback-alignment nonlinear --model 4 --alg fa \
     --target-scale <TS> --b1-scale <B1> --b2-scale <B2>
 ```
 
-Use `feedback-alignment <subcommand> --help` for the full flag list.
+Use `feedback-alignment <subcommand> --help` for the full flag list, or see
+[docs/cli.md](docs/cli.md) for workflow recipes, output filename schema,
+and per-CSV column meanings.
 
 ### Full sweep
 
