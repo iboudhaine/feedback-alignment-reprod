@@ -16,13 +16,21 @@ The repo implements all three tasks from the paper:
 Each task can be trained under standard backpropagation (BP), feedback
 alignment (FA), or shallow learning (output layer only).
 
+## Findings
+
+The paper's three qualitative claims reproduce: FA matches BP on the linear
+task and on MNIST, and a four-layer FA network beats a three-layer BP
+network on the nonlinear task. Full numerical results, plots, and an honest
+accounting of where our run falls short of the paper's published numbers
+are in [report/report.pdf](report/report.pdf).
+
 ## Setup
 
 Requires Python 3.10 or newer.
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate         # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
@@ -75,18 +83,32 @@ feedback-alignment nonlinear --model 4 --alg fa \
 
 Use `feedback-alignment <subcommand> --help` for the full flag list.
 
-To generate plots from the CSVs in `results/`:
+### Full sweep
+
+To reproduce every figure in `report/report.pdf` in one shot, run the
+bundled script:
 
 ```bash
-python plot_all.py            # default plots
-python plot_all.py --paper    # paper-style figures
+./run_all.sh
 ```
 
-To run the test suite:
+### Plots
+
+After any of the above, regenerate the figures from the CSVs:
+
+```bash
+python plot_all.py
+```
+
+### Tests
 
 ```bash
 pytest
 ```
+
+Includes a PyTorch-autograd gradient check against the hand-coded BP signals,
+a sanity test that FA-vs-BP alignment decreases during training, and shape
+contracts for the `Layer` / `MLP` / `step` API.
 
 ## Reference
 
