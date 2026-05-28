@@ -1,349 +1,349 @@
+"""Plot results from `results/` into `plots/`.
+
+Produces six figures:
+  linear_fig1.png            paper Fig 1: BP vs FA on the linear task
+  linear_fig4.png            paper Fig 4: FA-only sweep over omega
+  mnist.png                  paper Fig 2: best BP vs best FA on MNIST
+  mnist_sweep_heatmap.png    final test error over the (omega, beta) grid
+  nonlinear.png              paper Fig 3: BP / FA / shallow at two depths
+  nonlinear_sweep_heatmap.png  4-layer FA final NSE over the (b1, b2) grid
+"""
+from __future__ import annotations
+
 import argparse
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+
+BP_COLOR = "#222222"
+FA_COLOR = "#2ca02c"
+SHALLOW_COLOR = "#999999"
+GRID_COLOR = "#cccccc"
 
 
-def _plot_lines(files, xcol, ycol, title, out_path, show):
-    if not files:
-        return False
-    plt.figure()
-    plotted = False
-    for path in files:
-        df = pd.read_csv(path)
-        if xcol not in df.columns or ycol not in df.columns:
-            continue
-        plt.plot(df[xcol], df[ycol], label=path.stem)
-        plotted = True
-    if not plotted:
-        plt.close()
-        return False
-    plt.xlabel(xcol)
-    plt.ylabel(ycol)
-    plt.title(title)
-    plt.legend()
-    plt.tight_layout()
+# ---------- io helpers ----------
+
+@dataclass
+class Run:
+    path: Path
+    df: pd.DataFrame
+    final: float
+
+
+def _save(fig: plt.Figure, out_path: Path, show: bool) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(out_path)
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    print(f"wrote {out_path}")
     if show:
         plt.show()
-    plt.close()
-    return True
+    plt.close(fig)
 
 
-def _plot_fig4(csv_path: Path, trial_id: int, out_dir: Path, show: bool):
-    df = pd.read_csv(csv_path)
-    trial_used = "all"
-    if "trial" in df.columns:
-        if (df["trial"] == trial_id).any():
-            df = df[df["trial"] == trial_id]
-            trial_used = str(trial_id)
-        else:
-            trial_used = str(int(df["trial"].min()))
-            df = df[df["trial"] == df["trial"].min()]
-
-    if "omega" not in df.columns or "step" not in df.columns:
-        return False
-
-    series = [
-        ("nse", "nse", "NSE"),
-        ("angle_delta_h_fa_bp", "angle_bp", "Angle FA vs BP"),
-        ("angle_delta_h_fa_pbp", "angle_pbp", "Angle FA vs PBP"),
-    ]
-    wrote = False
-    for ycol, suffix, ylabel in series:
-        if ycol not in df.columns:
-            continue
-        plt.figure()
-        for omega, sub in df.groupby("omega"):
-            plt.plot(sub["step"], sub[ycol], label=f"omega={omega}")
-        plt.xlabel("step")
-        plt.ylabel(ylabel)
-        plt.title(f"{csv_path.stem} ({ycol}, trial {trial_used})")
-        plt.legend()
-        plt.tight_layout()
-        out_path = out_dir / f"{csv_path.stem}_{suffix}_trial{trial_used}.png"
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        plt.savefig(out_path)
-        if show:
-            plt.show()
-        plt.close()
-        wrote = True
-    return wrote
+def _smooth(s: pd.Series, window: int) -> pd.Series:
+    return s.rolling(window=window, min_periods=1, center=True).mean()
 
 
-def _set_paper_style():
-    plt.rcParams.update({
-        "font.size": 10,
-        "axes.spines.top": False,
-        "axes.spines.right": False,
-        "axes.grid": False,
-        "axes.linewidth": 1.0,
-        "xtick.direction": "in",
-        "ytick.direction": "in",
-    })
+# ---------- plotters ----------
 
+def plot_linear_fig1(results_dir: Path, out_dir: Path, show: bool) -> None:
+    bp_files = list(results_dir.glob("linear_fig1_bp_*.csv"))
+    fa_files = list(results_dir.glob("linear_fig1_fa_*.csv"))
+    if not bp_files or not fa_files:
+        return
+    bp = pd.read_csv(bp_files[0])
+    fa = pd.read_csv(fa_files[0])
 
-def _smooth(series, window):
-    if window <= 1:
-        return series
-    return series.rolling(window=window, min_periods=1, center=True).mean()
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(5.5, 5.5), sharex=True)
 
-
-def _rolling_std(series, window):
-    if window <= 1:
-        return None
-    return series.rolling(window=window, min_periods=1, center=True).std()
-
-
-def _algo_label_color(stem):
-    stem = stem.lower()
-    if "bp" in stem:
-        return "Backprop", "black"
-    if "fa" in stem:
-        return "Feedback alignment", "#2ca02c"
-    if "shallow" in stem:
-        return "Shallow", "#bdbdbd"
-    if "reinforce" in stem or "rl" in stem:
-        return "Reinforcement", "#7f7f7f"
-    return stem, "#1f77b4"
-
-
-def _paper_fig1_linear(results_dir: Path, out_dir: Path, show: bool, window: int):
-    files = list(results_dir.glob("linear_fig1_*_seed*.csv"))
-    if not files:
-        return False
-
-    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, figsize=(5, 6))
-    fa_angle = None
-    steps = None
-
-    for path in files:
-        df = pd.read_csv(path)
-        if "step" not in df.columns:
-            continue
-        label, color = _algo_label_color(path.stem)
-        ax1.plot(df["step"], df["nse"], color=color, label=label, linewidth=1.3)
-        if "angle_delta_h_fa_bp" in df.columns and "fa" in path.stem:
-            steps = df["step"]
-            fa_angle = np.degrees(df["angle_delta_h_fa_bp"])
-
+    ax1.plot(bp["step"], bp["nse"], color=BP_COLOR, label="Backprop", linewidth=1.0, alpha=0.85)
+    ax1.plot(fa["step"], fa["nse"], color=FA_COLOR, label="Feedback alignment", linewidth=1.0, alpha=0.95)
     ax1.set_yscale("log")
-    ax1.set_ylabel("Error (NSE)")
-    ax1.legend(frameon=False)
+    ax1.set_ylabel("NSE")
+    ax1.legend(frameon=False, loc="lower left")
+    ax1.grid(True, which="both", color=GRID_COLOR, linewidth=0.4)
 
-    if fa_angle is not None:
-        mean = _smooth(pd.Series(fa_angle), window)
-        std = _rolling_std(pd.Series(fa_angle), window)
-        ax2.plot(steps, mean, color="#2ca02c", linewidth=1.3)
-        if std is not None:
-            ax2.fill_between(steps, mean - std, mean + std, color="#2ca02c", alpha=0.25, linewidth=0)
-    ax2.axhline(90, color="#7f7f7f", linestyle="--", linewidth=1.0)
-    ax2.set_ylim(0, 90)
+    ax2.plot(fa["step"], np.degrees(fa["angle_delta_h_fa_bp"]), color=FA_COLOR, linewidth=1.0)
+    ax2.axhline(90, color="gray", linestyle="--", linewidth=0.6)
+    ax2.set_xlabel("Examples")
     ax2.set_ylabel("FA vs BP angle (deg)")
-    ax2.set_xlabel("No. Examples")
+    ax2.set_ylim(0, 95)
+    ax2.grid(True, color=GRID_COLOR, linewidth=0.4)
 
     fig.tight_layout()
-    out_path = out_dir / "fig1_linear.png"
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path)
-    if show:
-        plt.show()
-    plt.close(fig)
-    return True
+    _save(fig, out_dir / "linear_fig1.png", show)
 
 
-def _paper_fig2_mnist(results_dir: Path, out_dir: Path, show: bool):
-    files = list(results_dir.glob("mnist_*_seed*.csv"))
-    if not files:
-        return False
-
-    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, figsize=(5, 6))
-    plotted = False
-
-    for path in files:
-        df = pd.read_csv(path)
-        if "examples_seen" not in df.columns or "test_error_pct" not in df.columns:
-            continue
-        label, color = _algo_label_color(path.stem)
-        ax1.plot(df["examples_seen"], df["test_error_pct"], color=color, label=label, linewidth=1.3)
-        plotted = True
-
-        if "fa" in path.stem and "mean_angle_delta_h_fa_bp" in df.columns:
-            angles = np.degrees(df["mean_angle_delta_h_fa_bp"])
-            ax2.plot(df["examples_seen"], angles, color="#2ca02c", linewidth=1.3)
-
-    if not plotted:
-        plt.close(fig)
-        return False
-
-    ax1.set_yscale("log")
-    ax1.set_ylabel("% Error on Test Set")
-    ax1.legend(frameon=False)
-
-    ax2.axhline(90, color="#7f7f7f", linestyle="--", linewidth=1.0)
-    ax2.set_ylim(0, 90)
-    ax2.set_ylabel("FA vs BP angle (deg)")
-    ax2.set_xlabel("No. Examples")
-
-    fig.tight_layout()
-    out_path = out_dir / "fig2_mnist.png"
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path)
-    if show:
-        plt.show()
-    plt.close(fig)
-    return True
-
-
-def _paper_fig2_nonlinear(results_dir: Path, out_dir: Path, show: bool):
-    files = list(results_dir.glob("nonlinear_model*_seed*.csv"))
-    if not files:
-        return False
-
-    color_map = {
-        ("3", "bp"): "black",
-        ("3", "fa"): "#2ca02c",
-        ("3", "shallow"): "#bdbdbd",
-        ("4", "bp"): "#e377c2",
-        ("4", "fa"): "#1f77b4",
-        ("4", "shallow"): "#bdbdbd",
-    }
-
-    fig, ax = plt.subplots(1, 1, figsize=(5, 4))
-    plotted = False
-
-    for path in files:
-        m = re.search(r"nonlinear_model(\d+)_(bp|fa|shallow)", path.stem)
-        if not m:
-            continue
-        model = m.group(1)
-        alg = m.group(2)
-        df = pd.read_csv(path)
-        if "examples_seen" not in df.columns or "test_nse" not in df.columns:
-            continue
-        color = color_map.get((model, alg), "#1f77b4")
-        label = f"{model}-layer {alg.upper()}"
-        ax.plot(df["examples_seen"], df["test_nse"], color=color, label=label, linewidth=1.3)
-        plotted = True
-
-    if not plotted:
-        plt.close(fig)
-        return False
-
-    ax.set_yscale("log")
-    ax.set_ylabel("Error (NSE)")
-    ax.set_xlabel("No. Examples")
-    ax.legend(frameon=False)
-
-    fig.tight_layout()
-    out_path = out_dir / "fig2_nonlinear.png"
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path)
-    if show:
-        plt.show()
-    plt.close(fig)
-    return True
-
-
-def _paper_fig4_linear(results_dir: Path, out_dir: Path, show: bool, trial_id: int, window: int):
+def plot_linear_fig4(results_dir: Path, out_dir: Path, show: bool, window: int = 20) -> None:
     files = list(results_dir.glob("linear_fig4_seed*.csv"))
     if not files:
-        return False
+        return
+    df = pd.read_csv(files[0])
 
-    wrote = False
-    for csv_path in files:
-        df = pd.read_csv(csv_path)
-        if "trial" in df.columns:
-            if (df["trial"] == trial_id).any():
-                df = df[df["trial"] == trial_id]
-                trial_used = str(trial_id)
-            else:
-                trial_used = str(int(df["trial"].min()))
-                df = df[df["trial"] == df["trial"].min()]
-        else:
-            trial_used = "all"
+    omegas = sorted(df["omega"].unique())
+    cmap = plt.get_cmap("coolwarm")
+    norm = plt.Normalize(vmin=np.log10(min(omegas)), vmax=np.log10(max(omegas)))
 
-        if "omega" not in df.columns or "step" not in df.columns:
+    fig, axes = plt.subplots(3, 1, figsize=(6, 8), sharex=True)
+
+    for omega in omegas:
+        sub = df[df["omega"] == omega]
+        color = cmap(norm(np.log10(omega)))
+        grouped = sub.groupby("step")
+        nse_mean = grouped["nse"].mean()
+        ang_bp_mean = grouped["angle_delta_h_fa_bp"].mean()
+        ang_pbp_mean = grouped["angle_delta_h_fa_pbp"].mean()
+
+        axes[0].plot(nse_mean.index, _smooth(nse_mean, window), color=color, linewidth=1.1)
+        axes[1].plot(ang_bp_mean.index, np.degrees(_smooth(ang_bp_mean, window)), color=color, linewidth=1.1)
+        axes[2].plot(ang_pbp_mean.index, np.degrees(_smooth(ang_pbp_mean, window)), color=color, linewidth=1.1)
+
+    axes[0].set_yscale("log")
+    axes[0].set_ylabel("NSE")
+    axes[1].set_ylabel("FA vs BP angle (deg)")
+    axes[1].axhline(90, color="gray", linestyle="--", linewidth=0.6)
+    axes[1].set_ylim(0, 95)
+    axes[2].set_ylabel("FA vs pseudo-BP angle (deg)")
+    axes[2].axhline(90, color="gray", linestyle="--", linewidth=0.6)
+    axes[2].set_ylim(0, 95)
+    axes[2].set_xlabel("Examples")
+    for ax in axes:
+        ax.grid(True, color=GRID_COLOR, linewidth=0.4)
+
+    sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=axes, label="omega (W init scale)", shrink=0.7, pad=0.02)
+    cbar.set_ticks(np.log10(omegas))
+    cbar.set_ticklabels([f"{o:g}" for o in omegas])
+
+    _save(fig, out_dir / "linear_fig4.png", show)
+
+
+_MNIST_RX = re.compile(r"mnist_(bp|fa)_seed0(?:_omega([\d.]+))?(?:_beta([\d.]+))?(_sparse50)?\.csv$")
+
+
+def _load_mnist_runs(results_dir: Path) -> list[dict]:
+    runs = []
+    for path in results_dir.glob("mnist_*.csv"):
+        m = _MNIST_RX.match(path.name)
+        if not m:
             continue
-
-        omegas = sorted(df["omega"].unique())
-        cmap = plt.cm.coolwarm
-        colors = {omega: cmap(i / max(1, len(omegas) - 1)) for i, omega in enumerate(omegas)}
-
-        fig, axes = plt.subplots(3, 1, sharex=True, figsize=(5, 8))
-
-        for omega, sub in df.groupby("omega"):
-            color = colors.get(omega, "#1f77b4")
-            axes[0].plot(sub["step"], _smooth(sub["nse"], window), color=color, linewidth=1.0)
-            if "angle_delta_h_fa_bp" in sub.columns:
-                angles = np.degrees(sub["angle_delta_h_fa_bp"])
-                axes[1].plot(sub["step"], _smooth(pd.Series(angles), window), color=color, linewidth=1.0)
-            if "angle_delta_h_fa_pbp" in sub.columns:
-                angles = np.degrees(sub["angle_delta_h_fa_pbp"])
-                axes[2].plot(sub["step"], _smooth(pd.Series(angles), window), color=color, linewidth=1.0)
-
-        axes[0].set_yscale("log")
-        axes[0].set_ylabel("Error (NSE)")
-        axes[1].set_ylabel("FA vs BP angle (deg)")
-        axes[2].set_ylabel("FA vs PBP angle (deg)")
-        axes[2].set_xlabel("No. Examples")
-        for ax in axes[1:]:
-            ax.axhline(90, color="#7f7f7f", linestyle="--", linewidth=1.0)
-            ax.set_ylim(0, 90)
-
-        fig.tight_layout()
-        out_path = out_dir / f"{csv_path.stem}_fig4_trial{trial_used}.png"
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(out_path)
-        if show:
-            plt.show()
-        plt.close(fig)
-        wrote = True
-    return wrote
+        alg, om, be, sp = m.groups()
+        df = pd.read_csv(path)
+        runs.append({
+            "path": path,
+            "alg": alg,
+            "omega": float(om) if om else None,
+            "beta": float(be) if be else None,
+            "sparse": bool(sp),
+            "df": df,
+            "final": float(df["test_error_pct"].iloc[-1]),
+        })
+    return runs
 
 
-def main():
+def plot_mnist(results_dir: Path, out_dir: Path, show: bool) -> None:
+    runs = _load_mnist_runs(results_dir)
+    bp_runs = [r for r in runs if r["alg"] == "bp"]
+    fa_runs = [r for r in runs if r["alg"] == "fa" and not r["sparse"]]
+    sparse_runs = [r for r in runs if r["sparse"]]
+    if not bp_runs or not fa_runs:
+        return
+
+    bp_best = min(bp_runs, key=lambda r: r["final"])
+    fa_best = min(fa_runs, key=lambda r: r["final"])
+    sparse_best = min(sparse_runs, key=lambda r: r["final"]) if sparse_runs else None
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 6.5), sharex=True)
+
+    # background: faint FA curves to show the spread of the sweep
+    for r in fa_runs:
+        if r is fa_best:
+            continue
+        ax1.plot(r["df"]["examples_seen"], r["df"]["test_error_pct"],
+                 color=FA_COLOR, alpha=0.15, linewidth=0.8)
+        ax2.plot(r["df"]["examples_seen"], np.degrees(r["df"]["mean_angle_delta_h_fa_bp"]),
+                 color=FA_COLOR, alpha=0.15, linewidth=0.8)
+
+    ax1.plot(bp_best["df"]["examples_seen"], bp_best["df"]["test_error_pct"],
+             color=BP_COLOR, label=f"Backprop  (omega={bp_best['omega']:g})", linewidth=1.6)
+    ax1.plot(fa_best["df"]["examples_seen"], fa_best["df"]["test_error_pct"],
+             color=FA_COLOR,
+             label=f"FA  (omega={fa_best['omega']:g}, beta={fa_best['beta']:g})", linewidth=1.6)
+    if sparse_best is not None:
+        ax1.plot(sparse_best["df"]["examples_seen"], sparse_best["df"]["test_error_pct"],
+                 color=FA_COLOR, linestyle="--",
+                 label=f"FA + 50% sparsity  (omega={sparse_best['omega']:g}, beta={sparse_best['beta']:g})",
+                 linewidth=1.6)
+    ax1.set_yscale("log")
+    ax1.set_ylabel("Test error (%)")
+    ax1.legend(frameon=False, fontsize=9)
+    ax1.grid(True, which="both", color=GRID_COLOR, linewidth=0.4)
+
+    ax2.plot(fa_best["df"]["examples_seen"], np.degrees(fa_best["df"]["mean_angle_delta_h_fa_bp"]),
+             color=FA_COLOR, linewidth=1.6)
+    if sparse_best is not None:
+        ax2.plot(sparse_best["df"]["examples_seen"], np.degrees(sparse_best["df"]["mean_angle_delta_h_fa_bp"]),
+                 color=FA_COLOR, linestyle="--", linewidth=1.6)
+    ax2.axhline(90, color="gray", linestyle="--", linewidth=0.6)
+    ax2.set_ylim(0, 95)
+    ax2.set_xlabel("Examples")
+    ax2.set_ylabel("FA vs BP angle (deg)")
+    ax2.grid(True, color=GRID_COLOR, linewidth=0.4)
+
+    fig.tight_layout()
+    _save(fig, out_dir / "mnist.png", show)
+
+
+def plot_mnist_sweep_heatmap(results_dir: Path, out_dir: Path, show: bool) -> None:
+    runs = _load_mnist_runs(results_dir)
+    fa = {(r["omega"], r["beta"]): r["final"] for r in runs if r["alg"] == "fa" and not r["sparse"]}
+    if not fa:
+        return
+    omegas = sorted({k[0] for k in fa})
+    betas = sorted({k[1] for k in fa})
+    grid = np.array([[fa.get((o, b), np.nan) for b in betas] for o in omegas])
+
+    fig, ax = plt.subplots(figsize=(5.5, 4))
+    im = ax.imshow(grid, cmap="viridis_r", aspect="auto")
+    ax.set_xticks(range(len(betas)))
+    ax.set_xticklabels([f"{b:g}" for b in betas])
+    ax.set_yticks(range(len(omegas)))
+    ax.set_yticklabels([f"{o:g}" for o in omegas])
+    ax.set_xlabel("beta (B feedback scale)")
+    ax.set_ylabel("omega (W init scale)")
+    ax.set_title("MNIST FA: final test error (%)")
+    vmean = np.nanmean(grid)
+    for i in range(len(omegas)):
+        for j in range(len(betas)):
+            v = grid[i, j]
+            if not np.isnan(v):
+                ax.text(j, i, f"{v:.2f}", ha="center", va="center",
+                        color="white" if v > vmean else "black", fontsize=9)
+    fig.colorbar(im, ax=ax, label="Final test error (%)")
+    fig.tight_layout()
+    _save(fig, out_dir / "mnist_sweep_heatmap.png", show)
+
+
+_NL_RX = re.compile(
+    r"nonlinear_model(\d+)_(bp|fa|shallow)_seed0_ts([\d.]+)"
+    r"(?:_b1([\d.]+))?(?:_b2([\d.]+))?\.csv$"
+)
+
+
+def _load_nonlinear_runs(results_dir: Path) -> list[dict]:
+    runs = []
+    for path in results_dir.glob("nonlinear_*.csv"):
+        m = _NL_RX.match(path.name)
+        if not m:
+            continue
+        df = pd.read_csv(path)
+        runs.append({
+            "path": path,
+            "model": int(m.group(1)),
+            "alg": m.group(2),
+            "ts": float(m.group(3)),
+            "b1": float(m.group(4)) if m.group(4) else None,
+            "b2": float(m.group(5)) if m.group(5) else None,
+            "df": df,
+            "final": float(df["test_nse"].iloc[-1]),
+        })
+    return runs
+
+
+def plot_nonlinear(results_dir: Path, out_dir: Path, show: bool) -> None:
+    runs = _load_nonlinear_runs(results_dir)
+    if not runs:
+        return
+
+    def pick(model: int, alg: str, *, best: bool = False):
+        subset = [r for r in runs if r["model"] == model and r["alg"] == alg]
+        if not subset:
+            return None
+        return min(subset, key=lambda r: r["final"]) if best else subset[0]
+
+    bp3 = pick(3, "bp")
+    bp4 = pick(4, "bp")
+    sh3 = pick(3, "shallow")
+    sh4 = pick(4, "shallow")
+    fa3 = pick(3, "fa", best=True)
+    fa4 = pick(4, "fa", best=True)
+
+    fig, ax = plt.subplots(figsize=(7, 4.8))
+
+    def line(r, color, ls, label):
+        if r is None:
+            return
+        ax.plot(r["df"]["examples_seen"], r["df"]["test_nse"],
+                color=color, linestyle=ls, linewidth=1.6, label=label)
+
+    line(bp3, BP_COLOR, "-", "3-layer BP")
+    line(fa3, FA_COLOR, "-", f"3-layer FA  (b1={fa3['b1']:g})" if fa3 else None)
+    line(sh3, SHALLOW_COLOR, "-", "3-layer shallow")
+    line(bp4, BP_COLOR, "--", "4-layer BP")
+    line(fa4, FA_COLOR, "--",
+         f"4-layer FA  (b1={fa4['b1']:g}, b2={fa4['b2']:g})" if fa4 else None)
+    line(sh4, SHALLOW_COLOR, "--", "4-layer shallow")
+
+    ax.set_yscale("log")
+    ax.set_xlabel("Examples")
+    ax.set_ylabel("Test NSE")
+    ax.legend(frameon=False, fontsize=9, loc="lower left")
+    ax.grid(True, which="both", color=GRID_COLOR, linewidth=0.4)
+    fig.tight_layout()
+    _save(fig, out_dir / "nonlinear.png", show)
+
+
+def plot_nonlinear_sweep_heatmap(results_dir: Path, out_dir: Path, show: bool) -> None:
+    runs = _load_nonlinear_runs(results_dir)
+    fa4 = {(r["b1"], r["b2"]): r["final"]
+           for r in runs if r["model"] == 4 and r["alg"] == "fa"}
+    if not fa4:
+        return
+    b1s = sorted({k[0] for k in fa4})
+    b2s = sorted({k[1] for k in fa4})
+    grid = np.array([[fa4.get((a, b), np.nan) for b in b2s] for a in b1s])
+
+    fig, ax = plt.subplots(figsize=(5.5, 4))
+    im = ax.imshow(grid, cmap="viridis_r", aspect="auto")
+    ax.set_xticks(range(len(b2s)))
+    ax.set_xticklabels([f"{b:g}" for b in b2s])
+    ax.set_yticks(range(len(b1s)))
+    ax.set_yticklabels([f"{a:g}" for a in b1s])
+    ax.set_xlabel("b2 (B2 feedback scale)")
+    ax.set_ylabel("b1 (B1 feedback scale)")
+    ax.set_title("4-layer FA: final test NSE")
+    vmean = np.nanmean(grid)
+    for i in range(len(b1s)):
+        for j in range(len(b2s)):
+            v = grid[i, j]
+            if not np.isnan(v):
+                ax.text(j, i, f"{v:.3f}", ha="center", va="center",
+                        color="white" if v > vmean else "black", fontsize=9)
+    fig.colorbar(im, ax=ax, label="Final test NSE")
+    fig.tight_layout()
+    _save(fig, out_dir / "nonlinear_sweep_heatmap.png", show)
+
+
+# ---------- main ----------
+
+def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--results_dir", type=str, default="results")
-    p.add_argument("--out_dir", type=str, default="plots")
-    p.add_argument("--fig4_trial", type=int, default=0)
-    p.add_argument("--paper", action="store_true")
-    p.add_argument("--window", type=int, default=10)
+    p.add_argument("--results-dir", type=Path, default=Path("results"))
+    p.add_argument("--out-dir", type=Path, default=Path("plots"))
     p.add_argument("--show", action="store_true")
     args = p.parse_args()
 
-    results_dir = Path(args.results_dir)
-    out_dir = Path(args.out_dir)
-
-    if args.paper:
-        _set_paper_style()
-        ok = False
-        ok |= _paper_fig1_linear(results_dir, out_dir, args.show, args.window)
-        ok |= _paper_fig2_mnist(results_dir, out_dir, args.show)
-        ok |= _paper_fig2_nonlinear(results_dir, out_dir, args.show)
-        ok |= _paper_fig4_linear(results_dir, out_dir, args.show, args.fig4_trial, args.window)
-        if not ok:
-            print("No matching CSVs found for paper-style plots.")
-        return
-
-    # Default plots
-    linear_fig1 = list(results_dir.glob("linear_fig1_*_seed*.csv"))
-    _plot_lines(linear_fig1, "step", "nse", "Linear Fig.1 NSE", out_dir / "linear_fig1_nse.png", args.show)
-    _plot_lines(linear_fig1, "step", "angle_delta_h_fa_bp", "Linear Fig.1 Angle (FA vs BP)", out_dir / "linear_fig1_angle.png", args.show)
-
-    for path in results_dir.glob("linear_fig4_seed*.csv"):
-        _plot_fig4(path, args.fig4_trial, out_dir, args.show)
-
-    mnist_files = list(results_dir.glob("mnist_*_seed*.csv"))
-    _plot_lines(mnist_files, "examples_seen", "test_error_pct", "MNIST Test Error", out_dir / "mnist_error.png", args.show)
-    _plot_lines(mnist_files, "examples_seen", "mean_angle_delta_h_fa_bp", "MNIST Angle (FA vs BP)", out_dir / "mnist_angle.png", args.show)
-
-    nonlinear_files = list(results_dir.glob("nonlinear_model*_seed*.csv"))
-    _plot_lines(nonlinear_files, "examples_seen", "test_nse", "Nonlinear Test NSE", out_dir / "nonlinear_nse.png", args.show)
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    plot_linear_fig1(args.results_dir, args.out_dir, args.show)
+    plot_linear_fig4(args.results_dir, args.out_dir, args.show)
+    plot_mnist(args.results_dir, args.out_dir, args.show)
+    plot_mnist_sweep_heatmap(args.results_dir, args.out_dir, args.show)
+    plot_nonlinear(args.results_dir, args.out_dir, args.show)
+    plot_nonlinear_sweep_heatmap(args.results_dir, args.out_dir, args.show)
 
 
 if __name__ == "__main__":
