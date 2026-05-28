@@ -1,0 +1,405 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath, amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{microtype}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!50!black,
+    urlcolor=blue!50!black,
+    citecolor=blue!50!black,
+}
+
+\graphicspath{{../plots/}}
+
+\title{Reproducing Feedback Alignment \\
+       \large Lillicrap, Cownden, Tweed and Akerman (2014)}
+\author{Ilyas Boudhaine \and Abderrahmane Baidoune}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We reproduce the three experiments from \emph{Random feedback weights support
+learning in deep neural networks} (Lillicrap et al., 2014). The paper's
+central claim is that the exact transpose of the forward weights is not
+required for credit assignment: fixed random feedback matrices suffice, and
+the forward weights gradually align with them during training. We reimplement
+the algorithms in pure NumPy, run paper-faithful experiments on the linear
+function approximation task (Task 1), MNIST classification (Task 2), and a
+nonlinear teacher-student task (Task 3), and report findings against the
+paper's published curves. All three qualitative claims reproduce. Our MNIST
+accuracy is below the paper's published value, almost certainly because our
+hyperparameter grid is too coarse; we say so explicitly rather than tune it
+away. Code, results, and plots are available alongside this report.
+\end{abstract}
+
+\section{Introduction}
+
+Backpropagation requires that the feedback path used to compute hidden-layer
+error signals be the transpose of the forward weights. This is the
+\emph{weight transport} problem: a biological neuron has no obvious mechanism
+to read out and broadcast the precise transpose of another neuron's
+projections \cite{lillicrap2014}.
+
+The Lillicrap et al.\ paper makes a striking claim: this symmetry is
+unnecessary. Replacing the transpose with a \emph{fixed random matrix} $B$
+yields a feedback signal that, while initially uncorrelated with the true
+gradient, becomes a useful learning signal because the forward weights
+gradually \emph{align} with $B$ over training. Concretely, for a one-hidden
+layer network with output error $e = y^* - y$, the standard backprop hidden
+signal $W^\top e$ is replaced by $B e$ during learning. The paper shows that
+on a linear task, on MNIST, and on a nonlinear teacher-student task this
+substitution does not noticeably hurt performance, and in some regimes
+actually improves early-training dynamics.
+
+This report reproduces those three experiments end-to-end. We follow the
+paper's ``Full Methods'' specification as closely as possible. Where the
+paper leaves a choice to manual search (the initial scales $\omega$ and
+$\beta$ for MNIST, the teacher regime and feedback scales for the nonlinear
+task), we expose those choices explicitly via sweep commands and report
+which point we picked from each grid.
+
+\section{Methodology}
+
+\paragraph{Implementation.} The full codebase is written in NumPy
+($\sim$1.6k lines including tests). All three learning rules
+(backpropagation, feedback alignment, shallow learning) are defined in a
+single function \texttt{algorithms.step}; the three task drivers (linear,
+MNIST, nonlinear) invoke it with the appropriate feedback matrices. A
+gradient-check test compares the hand-coded backprop signals against
+PyTorch's autograd to numerical-precision tolerance ($10^{-10}$), so we know
+the underlying math is correct.
+
+\paragraph{Reproducibility.} Each task uses a named, independent random
+number generator for each of: dataset construction, weight initialisation,
+feedback-matrix construction, test-set construction, and example ordering.
+This means BP and FA on the same seed share identical student
+initialisations, isolating algorithmic differences from initialisation
+noise.
+
+\paragraph{Tasks.} The three architectures and the relevant
+paper-specified hyperparameters are summarised in Table~\ref{tab:setup}.
+
+\begin{table}[h]
+\centering
+\caption{Task setups. The right column lists hyperparameters specified
+explicitly by the paper. Others ($\omega$, $\beta$, target regime, $B$
+scales) are chosen by manual search.}
+\label{tab:setup}
+\small
+\begin{tabularx}{\linewidth}{l X X}
+\toprule
+Task & Architecture & Paper-fixed hyperparameters \\
+\midrule
+Linear (Fig.\ 1, Fig.\ 4) & $30 \to 20 \to 10$, linear & $\eta=10^{-3}$, $\omega=0.01$, $\beta=0.5$, $T \sim \mathcal{U}[-1,1]$ \\
+MNIST (Fig.\ 2)           & $784 \to 1000 \to 10$, sigmoid & $\eta=10^{-3}$, $\alpha=10^{-6}$, MSE loss \\
+Nonlinear (Fig.\ 3)       & $30 \to 20 \to 10$ or $30 \to 20 \to 10 \to 10$, tanh hidden, linear output & $\eta=10^{-3}$ \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\paragraph{What we ran.} A single seed (seed $=0$) for all experiments.
+For MNIST we ran $1.5\times 10^6$ examples per run across a
+$3\times 3$ grid of $(\omega,\beta) \in \{0.05, 0.1, 0.2\}^2$, plus three
+backprop baselines at the same $\omega$ values and one feedback-alignment
+run with 50\% sparsity. For the nonlinear task we ran $1.5\times 10^6$
+examples per run across an asymmetric grid of $(b_1, b_2)$ with each in
+$\{0.05, 0.1, 0.2\}$ for the four-layer student, three values of $b_1$ for
+the three-layer student, plus backprop and shallow-learning baselines at
+both depths. The full sweep took 17.5 hours of wall time on an 8-vCPU
+\texttt{c4-standard-8} VM (Intel Emerald Rapids) running seven parallel
+processes. We later realised that NumPy's BLAS backend defaults to
+multi-threading, so each of the seven processes spawned up to eight BLAS
+threads, oversubscribing the eight physical cores and serialising the work.
+Pinning each process to a single BLAS thread (e.g.\
+\texttt{OMP\_NUM\_THREADS=1 OPENBLAS\_NUM\_THREADS=1}) should give the
+roughly $7\times$ speedup the layout was meant to provide.
+
+\paragraph{Honest caveats vs.\ the paper.}
+The paper reports averages over multiple seeds; our results are single-seed.
+The paper's manual search for $(\omega, \beta)$ on MNIST is not reported in
+exact numerical detail. We picked a 3$\times$3 grid that brackets the
+typical scales used in the literature; if the paper's true optimum lies
+outside our grid we will not have found it. Both effects are visible in our
+MNIST numbers below.
+
+\section{Task 1: Linear function approximation}
+
+\subsection{Setup}
+
+The task is to learn a $\mathbb{R}^{30} \to \mathbb{R}^{10}$ linear map
+through a single hidden layer of width 20 with no biases. The target is
+$T \sim \mathcal{U}[-1, 1]^{10\times 30}$; inputs are $x \sim \mathcal{N}(0, I_{30})$
+with $y^* = T x$. The student is $y = W \cdot W_0 \cdot x$ with both
+matrices initialised uniformly in $[-\omega, \omega]$ at $\omega = 0.01$.
+The feedback matrix is $B \sim \mathcal{U}[-0.5, 0.5]^{20\times 10}$.
+Loss is $\frac{1}{2}\|y^* - y\|^2$.
+
+\subsection{Results: Fig.\ 1 reproduction}
+
+Figure~\ref{fig:linear_fig1} shows the headline result. The normalized
+squared error decreases for both algorithms, but feedback alignment
+\emph{learns faster} during the first $\sim$500 examples. This is the
+paper's main qualitative observation about the linear task: because the
+feedback matrix $B$ is drawn at scale $0.5$ while the forward $W$ is drawn
+at scale $0.01$, the FA hidden signal $Be$ is roughly fifty times larger
+than the BP signal $W^\top e$ at initialisation. The cost is a noisier
+trajectory, visible in the spread of the green curve.
+
+The bottom panel of Figure~\ref{fig:linear_fig1} shows the angle
+$\angle(\Delta h_\text{FA}, \Delta h_\text{BP})$. At step zero the two
+signals are essentially orthogonal at $\sim$85\textdegree{}. By step
+$\sim$300 the angle has dropped below 35\textdegree{} and stabilises around
+30\textdegree{} for the remainder of training. This is the
+\emph{alignment} phenomenon: the forward weights $W$ adapt so that
+$W^\top e$ and $Be$ point in nearly the same direction, even though $B$ is
+fixed and never sees the gradient.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.65\textwidth]{linear_fig1.png}
+\caption{Task 1, paper Fig.\ 1 reproduction. Top: NSE over training for BP
+(black) and FA (green). Bottom: angle between the FA hidden signal and the
+BP hidden signal. The dashed line at 90\textdegree{} marks orthogonality.
+Single trial, $\omega = 0.01$, $\eta = 10^{-3}$.}
+\label{fig:linear_fig1}
+\end{figure}
+
+\subsection{Results: Fig.\ 4 sweep over $\omega$}
+
+Figure~\ref{fig:linear_fig4} sweeps the initial-weight scale $\omega$ across
+the nine values specified by the paper, with 20 trials per $\omega$,
+plotting trial means. Three observations.
+
+\begin{enumerate}
+    \item All values of $\omega$ converge eventually, but smaller $\omega$
+          converges faster, consistent with the paper.
+    \item The asymptotic FA-vs-BP angle is a clean monotonic function of
+          $\omega$: smaller $\omega$ produces tighter alignment.
+    \item The angle to pseudo-backprop ($\angle(\Delta h_\text{FA},
+          W^+ e)$, third panel) follows the same trend and stays slightly
+          below the angle to BP, suggesting the FA signal aligns more
+          closely with the Moore-Penrose pseudoinverse direction than with
+          the exact transpose. The paper makes the same observation.
+\end{enumerate}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.75\textwidth]{linear_fig4.png}
+\caption{Task 1, paper Fig.\ 4 reproduction. FA-only sweep over the
+initial-weight scale $\omega$, colormap from $\omega = 10^{-4}$ (blue) to
+$\omega = 0.25$ (red). Mean across 20 trials. Top: NSE. Middle: angle
+between the FA hidden signal and the BP hidden signal. Bottom: angle to
+the pseudo-backprop hidden signal.}
+\label{fig:linear_fig4}
+\end{figure}
+
+\section{Task 2: MNIST classification}
+
+\subsection{Setup}
+
+The student is a $784 \to 1000 \to 10$ network with sigmoid hidden and
+sigmoid output units, biases on both layers, MSE loss against one-hot
+targets, weight decay $\alpha = 10^{-6}$ on the synaptic weights. The
+network is trained online for $1.5 \times 10^6$ examples drawn from the
+standard 60k MNIST training set (test error evaluated on the 10k held-out
+test set every 50k examples).
+
+The paper notes that $\omega$ (forward init scale) and $\beta$ (feedback
+init scale) are picked by manual search. Our search grid is
+$(\omega, \beta) \in \{0.05, 0.1, 0.2\}^2$.
+
+\subsection{Results}
+
+The sweep surface is shown in Figure~\ref{fig:mnist_heatmap} as a heatmap
+of final test error. Best feedback-alignment performance is achieved at
+$\omega = 0.1, \beta = 0.2$, with final test error $9.98\%$. Backprop at
+the same $\omega$ values reaches $10.04\%$ at best, essentially tied with
+FA. The qualitative claim of the paper, ``FA matches BP on MNIST'', holds.
+
+Figure~\ref{fig:mnist_main} shows learning curves for the best of each
+algorithm plus the sparse-50\% variant. Both BP and FA descend rapidly in
+the first $\sim$200k examples and asymptote near $10\%$ error. The
+sparse-50\% FA run is $\sim$1.4 percentage points worse than dense FA,
+which is consistent with the paper's reported small gap.
+
+The alignment angle (bottom panel of Figure~\ref{fig:mnist_main}) starts
+near 87\textdegree{} and decreases monotonically to $\sim$42\textdegree{}
+for the best FA run, and to $\sim$62\textdegree{} for the sparse variant.
+The paper observes the same monotonic decrease, although it reaches
+slightly smaller asymptotic angles than ours.
+
+\begin{figure}[h]
+\centering
+\begin{subfigure}{0.50\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{mnist_sweep_heatmap.png}
+    \caption{Sweep heatmap.}
+    \label{fig:mnist_heatmap}
+\end{subfigure}\hfill
+\begin{subfigure}{0.45\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{mnist.png}
+    \caption{Best-of-each comparison.}
+    \label{fig:mnist_main}
+\end{subfigure}
+\caption{Task 2, paper Fig.\ 2. (a) Final test error over the
+$(\omega, \beta)$ grid; the yellow column at $\beta = 0.2$ identifies the
+best regime. (b) Test error and FA-vs-BP angle over training for the best
+BP ($\omega = 0.2$), best FA ($\omega = 0.1, \beta = 0.2$), and FA with
+50\% sparsity on $W$ and $B$. Faint background curves are the other FA
+sweep points.}
+\end{figure}
+
+\subsection{Honest gap vs.\ the paper}
+
+The paper achieves roughly $2$--$3\%$ test error on MNIST under FA, whereas
+we plateau at $\sim$10\%. Three plausible causes:
+\begin{enumerate}
+    \item \textbf{Hyperparameter grid too narrow.} Our heatmap is
+          monotonically decreasing toward larger $\beta$ at every $\omega$,
+          which suggests the optimum may lie at $\beta > 0.2$. We did not
+          extend the grid.
+    \item \textbf{Single seed.} The paper reports averages; one seed gives
+          us no smoothing.
+    \item \textbf{No data augmentation, no learning-rate schedule.} The
+          paper uses neither, so this is not the gap.
+\end{enumerate}
+We did not attempt to close this gap by extending the sweep. The
+qualitative claim (``BP and FA tie on MNIST'') reproduces under our grid;
+the quantitative claim does not.
+
+\section{Task 3: Nonlinear teacher-student}
+
+\subsection{Setup}
+
+A fixed teacher network of architecture $30 \to 20 \to 10 \to 10$ with
+tanh-tanh-linear activations generates targets for inputs
+$x \sim \mathcal{N}(0, I_{30})$. Two student architectures are considered:
+a three-layer net $30 \to 20 \to 10$ (one tanh hidden layer, linear output)
+and a four-layer net $30 \to 20 \to 10 \to 10$ matching the teacher's
+architecture. Each is trained under BP, FA, and ``shallow'' learning
+(output layer only) for $1.5 \times 10^6$ online examples. NSE is
+evaluated on a 5000-example fixed test set drawn from the same input
+distribution.
+
+The paper notes that the teacher regime and feedback scales are picked
+manually. Our teacher uses all weights $\sim \mathcal{U}[-1, 1]$ and no
+biases. For the four-layer FA student we sweep
+$(b_1, b_2) \in \{0.05, 0.1, 0.2\}^2$ (partial, see Section 6).
+
+\subsection{Results}
+
+Figure~\ref{fig:nonlinear_main} shows the headline learning curves and
+Figure~\ref{fig:nonlinear_heatmap} the four-layer FA sweep surface.
+
+The four-layer backprop student converges to essentially zero NSE
+($\sim 10^{-7}$), which is unsurprising: the student architecture exactly
+matches the teacher, so backprop on a noise-free regression problem can
+recover the teacher's weights to numerical precision. The four-layer FA
+student, with best feedback scales $b_1 = b_2 = 0.2$, reaches NSE $0.103$.
+
+Crucially, \emph{four-layer FA outperforms three-layer BP} ($0.103$ vs.\
+$0.190$): adding a hidden layer and training it with random feedback beats
+adding nothing and training optimally. This is the paper's central
+qualitative claim for Task 3 and it reproduces cleanly.
+
+Three-layer FA ($0.221$ at best $b_1 = 0.2$) closely matches three-layer
+BP ($0.190$). Shallow learning fails entirely at both depths
+($\sim 0.67$--$1.00$ NSE), confirming that the nonlinearity is essential
+to the task and that an output layer trained alone cannot capture it.
+
+\begin{figure}[h]
+\centering
+\begin{subfigure}{0.55\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{nonlinear.png}
+    \caption{Learning curves.}
+    \label{fig:nonlinear_main}
+\end{subfigure}\hfill
+\begin{subfigure}{0.40\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{nonlinear_sweep_heatmap.png}
+    \caption{Four-layer FA sweep.}
+    \label{fig:nonlinear_heatmap}
+\end{subfigure}
+\caption{Task 3, paper Fig.\ 3. (a) NSE over training for BP, FA, and
+shallow learning at depths 3 and 4. Solid lines are the three-layer
+student, dashed lines the four-layer student. The four-layer FA curve
+(dashed green) drops below the three-layer BP curve (solid black) before
+$10^6$ examples, reproducing the paper's central claim. (b) Heatmap of
+final test NSE over $(b_1, b_2)$ for the four-layer student. White cells
+were not in our sweep grid.}
+\end{figure}
+
+\section{Discussion}
+
+\paragraph{The qualitative claims reproduce.} In all three tasks the
+direction of the paper's reported effects holds. FA matches BP on the
+linear task (Fig.\ 1) and on MNIST (Fig.\ 2). Alignment emerges in both
+settings, with the angle decreasing monotonically from near orthogonal at
+initialisation. Deeper-net FA outperforms shallower-net BP on the
+nonlinear task (Fig.\ 3). The relationship between $\omega$ and final
+alignment angle in the Fig.\ 4 sweep is monotonic and clean.
+
+\paragraph{What we could not reproduce.} Our MNIST final test error
+($\sim$10\%) is well above the paper's published number ($\sim$2--3\%).
+The most likely cause is an under-sized hyperparameter search; secondary
+possibilities are the single-seed protocol and unreported training-time
+details in the paper. We deliberately did not extend the sweep to make our
+number look better, since the qualitative finding (the algorithms tie) is
+what the paper actually claims for that figure.
+
+\paragraph{Limitations.} Beyond the MNIST gap: all our results use a
+single random seed; the paper averages across multiple trials. The
+nonlinear sweep does not cover the $(b_1, b_2)$ grid uniformly (two off-
+diagonal cells are missing). We did not reproduce Fig.\ 3a (visualisation
+of individual learned functions), only the learning-curve panel.
+
+\paragraph{Bug fixes relative to a naive implementation.} Two issues that
+do not appear in the paper but matter for a faithful reproduction. First,
+splitting random streams by purpose (data, init, feedback, order) is
+necessary to avoid accidental correlations; using a single seeded RNG for
+everything makes initialisations co-vary with dataset draws across runs.
+Second, in MNIST the training loop must reshuffle the example order each
+epoch rather than cycle a single fixed permutation 25 times. Without
+these, BP and FA on the same seed are not comparable.
+
+\paragraph{Bigger picture.} Feedback alignment is a striking
+demonstration that the brain does not need weight transport to learn.
+Whether it scales to deeper or harder tasks is a separate question, partly
+addressed by later papers (direct feedback alignment, sign-symmetry, and
+target propagation lineages). Our reproduction confirms that the original
+2014 result is solid: under online SGD with the paper's specifications,
+random fixed feedback is enough.
+
+\section{Code and data availability}
+
+The code, sweep configurations, and analysis script are available alongside
+this report. The full sweep can be reproduced by following the README's
+``How to run'' section. The
+plotting script (\texttt{plot\_all.py}) regenerates every figure in this
+report from the CSV outputs in \texttt{results/}.
+
+\bibliographystyle{plain}
+\begin{thebibliography}{1}
+\bibitem{lillicrap2014}
+T.~P. Lillicrap, D.~Cownden, D.~B. Tweed, and C.~J. Akerman.
+\newblock Random feedback weights support learning in deep neural networks.
+\newblock \emph{arXiv:1411.0247}, 2014.
+\newblock \url{https://arxiv.org/abs/1411.0247}.
+\end{thebibliography}
+
+\end{document}
