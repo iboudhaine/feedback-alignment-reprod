@@ -8,6 +8,8 @@ __pycache__/
 # pytest cache
 .pytest_cache/
 
-# Experiment outputs and dataset download
+# Experiment outputs, plots, and dataset download
 results/
+plots/
+run.log
 data/
