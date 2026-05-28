@@ -11,5 +11,15 @@ __pycache__/
 # Experiment outputs, plots, and dataset download
 results/
 plots/
-run.log
+*.log
+
+# LaTeX auxiliary files
+*.aux
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.bbl
+*.blg
 data/
