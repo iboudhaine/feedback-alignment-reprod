@@ -12,6 +12,14 @@ authors = [
     { name = "Ilyas Boudhaine" },
     { name = "Abderrahmane Baidoune" },
 ]
+license = { file = "LICENSE" }
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
 dependencies = [
     "numpy>=1.25",
     "pandas>=2.0",
